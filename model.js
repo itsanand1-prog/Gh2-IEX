@@ -20,6 +20,11 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  /** Coerce an optional numeric input to a finite number, defaulting to 0. */
+  function num(x) {
+    return Number.isFinite(x) ? x : 0;
+  }
+
   function clamp(x, lo, hi) {
     if (!Number.isFinite(x)) return lo;
     if (lo > hi) { const tmp = lo; lo = hi; hi = tmp; }
@@ -72,13 +77,46 @@
 
   const MAX_STACK_ITER = 20000;
 
+  /** The five units the additional-opex field can be entered in. */
+  const OPEX_UNITS = ['Rs/kg H2', 'Rs/unit power', 'Rs/MW/year', 'Rs/year', '% of capex/year'];
+
+  /**
+   * Convert an additional-opex figure from the user's chosen unit into Rs/kg H2.
+   *
+   * `Rs/unit power` multiplies by SEC, which equals annual_units ÷ annual_kg.
+   * That is deliberate: a per-unit charge such as electricity duty applies only
+   * to energy actually drawn, i.e. only during operating hours. Nameplate hours
+   * are never used here.
+   *
+   * ctx: { SEC, MW, annualKg, capexGross }
+   */
+  function normaliseOpex(value, unit, ctx) {
+    if (!Number.isFinite(value) || value === 0) return 0;
+    const kg = ctx.annualKg;
+    switch (unit) {
+      case 'Rs/kg H2': return value;
+      case 'Rs/unit power': return value * ctx.SEC;
+      case 'Rs/MW/year': return kg > 0 ? (value * ctx.MW) / kg : 0;
+      case 'Rs/year': return kg > 0 ? value / kg : 0;
+      case '% of capex/year': return kg > 0 ? ((value / 100) * ctx.capexGross) / kg : 0;
+      default: return 0;
+    }
+  }
+
   /**
    * Core LCOH computation given an already-resolved (hours, w) pair.
    * c: { MW, N, r, capexPerKW, electrolyserPerKW, SEC, loadFactor,
-   *      omPct, waterCostPerKg, stackPct, stackLifeHours, residualPct }
+   *      omPct, waterCostPerKg, stackPct, stackLifeHours, residualPct,
+   *      additionalCapexPerKW, capexSubsidyPerKW, additionalOpex,
+   *      additionalOpexUnit, productionSubsidyPerKg, powerSubsidyPerUnit }
+   *
+   * Every field on the second line is optional and defaults to zero, so a
+   * caller that omits them all gets bit-identical results to the version of
+   * this engine that predated them (asserted in tests/charges.test.js).
    */
   function coreLCOH(hours, w, adder, lossFactor, c) {
-    const errors = [];
+    const errors = [];   // block the result
+    const warnings = []; // informational; the result stays valid and displayable
     const MW = c.MW;
     const SEC = c.SEC;
     const loadFactor = c.loadFactor;
@@ -97,16 +135,37 @@
     const actualTpa = annualKg / 1000;
     const capacityFactor = hours / 8760;
 
-    const capex = MW * 1000 * c.capexPerKW;
+    // --- capital chain ----------------------------------------------------
+    // Gross carries any user-entered additional capex; net deducts a capital
+    // subsidy at year zero, before the CRF is applied. O&M is charged on
+    // GROSS (the asset needs maintaining regardless of who funded it) while
+    // the annuity and residual value work off NET (Ind AS 20: a capital grant
+    // reduces the asset's carrying amount).
+    const kW = MW * 1000;
+    const capexBase = kW * c.capexPerKW;
+    const capexExtra = kW * num(c.additionalCapexPerKW);
+    const capexGross = capexBase + capexExtra;
+    const capexSubsidy = kW * num(c.capexSubsidyPerKW);
+    const capexClamped = capexGross - capexSubsidy < 0;
+    const capexNet = Math.max(capexGross - capexSubsidy, 0);
+    if (capexClamped) {
+      // A warning, never an error: the result stays finite and displayable.
+      warnings.push('Capital subsidy exceeds gross capex — net capex has been clamped to zero.');
+    }
+
+    const capex = capexGross; // headline "total capex" remains the asset cost
     const crf = CRF(r, N);
-    const residualValue = capex * c.residualPct;
+    const residualValue = capexNet * c.residualPct;
     const denomN = Math.pow(1 + r, N);
     const annualisedCapex = Number.isFinite(denomN) && denomN > 0
-      ? (capex - residualValue / denomN) * crf
-      : capex * crf;
-    const annualOm = capex * c.omPct;
+      ? (capexNet - residualValue / denomN) * crf
+      : capexNet * crf;
+    const annualOm = capexGross * c.omPct;
 
-    const stackCostTotal = MW * 1000 * c.electrolyserPerKW * c.stackPct;
+    // Stack cost is unaffected by additional capex or by any subsidy — it is
+    // derived from the base electrolyser cost only, and a subsidy on the
+    // initial build does not recur at replacement.
+    const stackCostTotal = kW * c.electrolyserPerKW * c.stackPct;
     let stackSinking = 0;
     let stackIntervalYears = null;
     if (hours > 0 && c.stackLifeHours > 0) {
@@ -132,19 +191,45 @@
     const powerPerKg = SEC * landedAvg;
     const waterPerKg = c.waterCostPerKg;
 
-    const lcoh = annualKgOk
-      ? capitalPerKg + omPerKg + stackPerKg + powerPerKg + waterPerKg
+    // --- additional opex and subsidies -----------------------------------
+    const opexUnit = OPEX_UNITS.indexOf(c.additionalOpexUnit) !== -1
+      ? c.additionalOpexUnit
+      : 'Rs/unit power';
+    const extraOpexPerKg = annualKgOk
+      ? normaliseOpex(num(c.additionalOpex), opexUnit, {
+        SEC: SEC, MW: MW, annualKg: annualKg, capexGross: capexGross,
+      })
+      : 0;
+    const subsidyKgPerKg = num(c.productionSubsidyPerKg);
+    const subsidyPwrPerKg = num(c.powerSubsidyPerUnit) * SEC;
+    const subsidyTotalPerKg = subsidyKgPerKg + subsidyPwrPerKg;
+
+    // Gross of subsidy — the denominator for the breakdown table's shares.
+    // Sharing against a subsidised net produces shares above 100%.
+    const grossPerKg = annualKgOk
+      ? capitalPerKg + omPerKg + stackPerKg + powerPerKg + waterPerKg + extraOpexPerKg
       : NaN;
+
+    const lcoh = annualKgOk ? grossPerKg - subsidyTotalPerKg : NaN;
+
+    // Subsidies are allowed to drive LCOH negative — do not clamp, just say so.
+    if (Number.isFinite(lcoh) && lcoh < 0) {
+      warnings.push('Subsidies exceed the gross cost of production — LCOH is negative at these settings.');
+    }
 
     const ok = errors.length === 0 && Number.isFinite(lcoh);
 
     return {
-      ok, errors,
+      ok, errors, warnings,
       hours, w, landedAvg,
       nameplateTpa, annualKg, actualTpa, capacityFactor,
-      capex, annualisedCapex, annualOm, stackCostTotal, stackSinking,
+      capex, capexBase, capexExtra, capexGross, capexSubsidy, capexNet, capexClamped,
+      annualisedCapex, annualOm, stackCostTotal, stackSinking,
       stackIntervalYears,
       capitalPerKg, omPerKg, stackPerKg, powerPerKg, waterPerKg,
+      extraOpexPerKg, opexUnit,
+      subsidyKgPerKg, subsidyPwrPerKg, subsidyTotalPerKg,
+      grossPerKg,
       lcoh,
     };
   }
@@ -212,15 +297,23 @@
    * the final block is shorter when plantLife is not a multiple of blockLen).
    *
    * base: the coreLCOH() result at the flat/optimum operating point providing
-   * hours, landedAvg, annualKg, capex, stackCostTotal.
+   * hours, landedAvg, annualKg, capexGross, capexNet, stackCostTotal, and the
+   * additional-opex / subsidy per-kg lines.
    * c: same cost-parameter bag as coreLCOH, plus { plantLife }.
+   *
+   * The rate base opens at capexNet, not capexGross: a capital subsidy reduces
+   * the balance the developer earns a return on, which is the standard
+   * regulatory treatment. Additional capex the developer actually deployed
+   * *does* enter the rate base. O&M, as in the flat LCOH, is charged on gross.
    */
   function repricingSchedule(base, c, greyBenchmark, blockLen) {
     blockLen = blockLen || 3;
     const { r, N, plantLife, omPct, waterCostPerKg, SEC } = c;
     const hours = base.hours;
     const annualKg = base.annualKg;
-    const capex = base.capex;
+    // Fall back to `capex` so a caller passing a pre-charges result still works.
+    const capexGross = Number.isFinite(base.capexGross) ? base.capexGross : base.capex;
+    const capexNet = Number.isFinite(base.capexNet) ? base.capexNet : base.capex;
     const stackCostTotal = base.stackCostTotal;
     const landedAvg = base.landedAvg;
 
@@ -229,12 +322,17 @@
     }
 
     const powerPerKg = SEC * landedAvg;
-    const omPerKg = (capex * omPct) / annualKg;
+    const omPerKg = (capexGross * omPct) / annualKg;
     const waterPerKg = c.waterCostPerKg;
+    // Flat across every block under the constant-price-year assumption, exactly
+    // as the power and water lines are, so they shift all block prices equally
+    // and leave NPV-neutrality undisturbed.
+    const extraOpexPerKg = num(base.extraOpexPerKg);
+    const subsidyTotalPerKg = num(base.subsidyTotalPerKg);
     const replacementYear = hours > 0 ? Math.ceil(c.stackLifeHours / hours) : Infinity;
 
     const capitalCharge = new Array(plantLife + 1).fill(0); // 1-indexed, [0] unused
-    let rateBase = capex;
+    let rateBase = capexNet;
     let stackDep = 0;
     const openingRateBase = new Array(plantLife + 1).fill(0);
     for (let tYear = 1; tYear <= plantLife; tYear++) {
@@ -243,7 +341,7 @@
         stackDep = stackCostTotal / (plantLife - tYear + 1);
       }
       openingRateBase[tYear] = rateBase;
-      const depreciation = tYear <= N ? capex / N : 0;
+      const depreciation = tYear <= N ? capexNet / N : 0;
       const ret = r * rateBase;
       capitalCharge[tYear] = (depreciation + stackDep + ret) / annualKg;
       rateBase -= depreciation;
@@ -261,7 +359,8 @@
         pv += capitalCharge[start + i - 1] / Math.pow(1 + r, i);
       }
       const capitalAnnuity = crfBlock * pv;
-      const price = capitalAnnuity + powerPerKg + omPerKg + waterPerKg;
+      const price = capitalAnnuity + powerPerKg + omPerKg + waterPerKg
+        + extraOpexPerKg - subsidyTotalPerKg;
       blocks.push({
         block: blocks.length + 1,
         startYear: start,
@@ -282,11 +381,17 @@
     }
     const pvLevelisedPrice = CRF(r, plantLife) * pvSum;
 
-    const cashFlows = [-capex];
+    // Year 0 outlay is net of any capital subsidy — that is what the developer
+    // actually funds. Each year they receive the contract price from the buyer
+    // *plus* the per-kg and per-unit subsidies from the grantor (the contract
+    // price already has those netted out of it), and pay O&M on gross capex
+    // along with power, water and any additional opex.
+    const cashFlows = [-capexNet];
     for (let tYear = 1; tYear <= plantLife; tYear++) {
       const block = blocks[Math.floor((tYear - 1) / blockLen)];
-      const revenue = block.price * annualKg;
-      const opex = capex * omPct + annualKg * (powerPerKg + waterPerKg);
+      const revenue = (block.price + subsidyTotalPerKg) * annualKg;
+      const opex = capexGross * omPct
+        + annualKg * (powerPerKg + waterPerKg + extraOpexPerKg);
       const stackOut = tYear === replacementYear ? stackCostTotal : 0;
       cashFlows.push(revenue - opex - stackOut);
     }
@@ -304,6 +409,8 @@
     clamp,
     interpolateSweep,
     CRF,
+    OPEX_UNITS,
+    normaliseOpex,
     computeCapexPerKW,
     ceilingToThreshold,
     thresholdToCeiling,
