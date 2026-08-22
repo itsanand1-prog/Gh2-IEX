@@ -306,6 +306,11 @@
         }),
       ]);
 
+      var intro = el('p', {
+        class: 'intro',
+        text: 'This dashboard estimates the levelised cost of green hydrogen (LCOH) for an Indian electrolyser that buys power only from the IEX Green Day-Ahead Market, running whenever the 15-minute block price falls below a ceiling you set — with no captive solar/wind and no battery storage. It replays four real historical price years (Aug 2022–Aug 2026) so you can see how the same strategy would have performed across different market conditions. Set the plant size, price ceiling, state and cost assumptions on the left, and the resulting cost per kilogram, the LCOH-minimising ceiling, and a full capital/O&M/stack/power/water breakdown update instantly on the right.',
+      });
+
       var main = el('main', { class: 'layout' });
       var controls = el('section', { class: 'controls', 'aria-label': 'Inputs' });
       var results = el('section', { class: 'results', 'aria-label': 'Results' });
@@ -322,6 +327,7 @@
       ]);
 
       root.appendChild(header);
+      root.appendChild(intro);
       root.appendChild(main);
       root.appendChild(footer);
 
