@@ -773,7 +773,7 @@
     // Charts
     // ------------------------------------------------------------------
     var CHART_W = 760, CHART_H = 440;
-    var MARGIN = { top: 24, right: 24, bottom: 54, left: 78 };
+    var MARGIN = { top: 46, right: 24, bottom: 54, left: 78 };
     var PLOT_W = CHART_W - MARGIN.left - MARGIN.right;
     var PLOT_H = CHART_H - MARGIN.top - MARGIN.bottom;
     var COLORS = ['#1b6ec2', '#c2571b', '#2b8a3e', '#9c36b5', '#868e96'];
@@ -781,17 +781,119 @@
     function scaleLinear(domain, range) {
       var d0 = domain[0], d1 = domain[1], r0 = range[0], r1 = range[1];
       var span = d1 - d0;
-      return function (x) {
+      var fn = function (x) {
         if (span === 0) return r0;
         return r0 + ((x - d0) / span) * (r1 - r0);
       };
+      fn.invert = function (px) {
+        var rspan = r1 - r0;
+        if (rspan === 0) return d0;
+        return d0 + ((px - r0) / rspan) * span;
+      };
+      return fn;
     }
 
     function clearSvg(svg) {
       while (svg.firstChild) svg.removeChild(svg.firstChild);
     }
 
-    function drawAxes(svg, xScale, xDomain, yScale, yDomain, xLabel, yLabel, xTickFmt, yTickFmt) {
+    // Nearest index in an ascending array of numbers.
+    function bisectNearest(xs, x) {
+      var n = xs.length;
+      if (!n) return -1;
+      var lo = 0, hi = n - 1;
+      if (x <= xs[0]) return 0;
+      if (x >= xs[hi]) return hi;
+      while (hi - lo > 1) {
+        var mid = (lo + hi) >> 1;
+        if (xs[mid] <= x) lo = mid; else hi = mid;
+      }
+      return (x - xs[lo] <= xs[hi] - x) ? lo : hi;
+    }
+
+    // Mouse/pointer event client coords -> this SVG's own viewBox coordinates,
+    // independent of how much the browser has scaled the element on screen.
+    function svgPoint(svg, evt) {
+      var pt = svg.createSVGPoint();
+      pt.x = evt.clientX;
+      pt.y = evt.clientY;
+      var ctm = svg.getScreenCTM();
+      if (!ctm) return { x: 0, y: 0 };
+      var p = pt.matrixTransform(ctm.inverse());
+      return { x: p.x, y: p.y };
+    }
+
+    // A small floating label, built from SVG elements only (never innerHTML),
+    // shown/hidden via the `visibility` presentation attribute.
+    function makeTooltip(svg) {
+      var g = svgEl('g', { class: 'tooltip-g', visibility: 'hidden', 'pointer-events': 'none' });
+      var bg = svgEl('rect', { class: 'tooltip-bg', rx: '4', ry: '4' });
+      g.appendChild(bg);
+      var texts = [0, 1, 2].map(function (i) {
+        var t = svgEl('text', { class: i === 0 ? 'tooltip-title' : 'tooltip-line', x: '9', y: String(16 + i * 15) });
+        g.appendChild(t);
+        return t;
+      });
+      svg.appendChild(g);
+      return {
+        show: function (lines, anchorX, anchorY) {
+          var shown = 0;
+          texts.forEach(function (t, i) {
+            var line = lines[i] || '';
+            t.textContent = line;
+            if (line) shown++;
+          });
+          g.setAttribute('visibility', 'visible');
+          var maxW = 0;
+          texts.forEach(function (t) {
+            if (!t.textContent) return;
+            var b = t.getBBox();
+            if (b.width > maxW) maxW = b.width;
+          });
+          var w = maxW + 18;
+          var h = shown * 15 + 10;
+          bg.setAttribute('width', w);
+          bg.setAttribute('height', h);
+          var gx = anchorX + 14;
+          var gy = anchorY - h - 10;
+          if (gx + w > CHART_W - 4) gx = anchorX - w - 14;
+          if (gy < 2) gy = anchorY + 14;
+          g.setAttribute('transform', 'translate(' + gx + ',' + gy + ')');
+        },
+        hide: function () { g.setAttribute('visibility', 'hidden'); },
+      };
+    }
+
+    // Compact inline legend: swatches + labels, auto-wrapping within maxWidth.
+    function drawLegend(svg, items, originX, originY, maxWidth) {
+      var g = svgEl('g', { class: 'legend' });
+      svg.appendChild(g);
+      var x = 0, y = 0, rowH = 20;
+      items.forEach(function (item) {
+        var itemG = svgEl('g');
+        g.appendChild(itemG);
+        var swatch;
+        if (item.type === 'dot') {
+          swatch = svgEl('circle', { cx: 6, cy: 6, r: 5, fill: item.color });
+        } else if (item.type === 'box') {
+          swatch = svgEl('rect', { x: 0, y: 1, width: 12, height: 11, fill: item.color });
+        } else {
+          swatch = svgEl('line', { x1: 0, y1: 6, x2: 20, y2: 6, stroke: item.color, 'stroke-width': item.width || 3 });
+          if (item.dash) swatch.setAttribute('stroke-dasharray', item.dash);
+        }
+        itemG.appendChild(swatch);
+        var t = svgEl('text', { x: 26, y: 10, class: 'axis-label' });
+        t.textContent = item.label;
+        itemG.appendChild(t);
+        var bw = itemG.getBBox().width;
+        if (x + bw > maxWidth && x > 0) { x = 0; y += rowH; }
+        itemG.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+        x += bw + 26;
+      });
+      g.setAttribute('transform', 'translate(' + originX + ',' + originY + ')');
+    }
+
+    function drawAxes(svg, xScale, xDomain, yScale, yDomain, xLabel, yLabel, xTickFmt, yTickFmt, xTickValues) {
       var g = svgEl('g', { class: 'axes' });
       g.appendChild(svgEl('line', {
         x1: MARGIN.left, y1: MARGIN.top + PLOT_H, x2: MARGIN.left + PLOT_W, y2: MARGIN.top + PLOT_H,
@@ -802,8 +904,9 @@
         stroke: 'currentColor', 'stroke-width': '1',
       }));
       var xTicks = 5, yTicks = 5;
-      for (var i = 0; i <= xTicks; i++) {
-        var xv = xDomain[0] + (i / xTicks) * (xDomain[1] - xDomain[0]);
+      var xValues = xTickValues || [0, 1, 2, 3, 4, 5].map(function (i) { return xDomain[0] + (i / xTicks) * (xDomain[1] - xDomain[0]); });
+      for (var i = 0; i < xValues.length; i++) {
+        var xv = xValues[i];
         var px = xScale(xv);
         g.appendChild(svgEl('line', { x1: px, y1: MARGIN.top + PLOT_H, x2: px, y2: MARGIN.top + PLOT_H + 5, stroke: 'currentColor' }));
         var t1 = svgEl('text', { x: px, y: MARGIN.top + PLOT_H + 22, 'text-anchor': 'middle', class: 'axis-label' });
@@ -899,6 +1002,44 @@
         svg.appendChild(svgEl('circle', { cx: mx, cy: my, r: '5', fill: COLORS[3] }));
       }
 
+      drawLegend(svg, [
+        { type: 'line', color: COLORS[0], width: 2, label: 'Current year (' + params.year + ')' },
+        { type: 'line', color: COLORS[4], width: 1, label: 'Other years (faint)' },
+        { type: 'line', color: COLORS[2], width: 1, dash: '2 2', label: 'Optimum ceiling' },
+        { type: 'line', color: COLORS[1], width: 1, dash: '4 3', label: 'Grey benchmark' },
+        { type: 'dot', color: COLORS[3], label: 'Your setting' },
+      ], MARGIN.left, 6, PLOT_W);
+
+      var xs = mainPts.map(function (p) { return p[0]; });
+      var tooltip; // assigned last so its <g> paints on top of everything else
+      var marker = svgEl('circle', { class: 'hover-marker', r: '4.5', visibility: 'hidden' });
+      var crosshair = svgEl('line', { class: 'crosshair-line', visibility: 'hidden' });
+      svg.appendChild(crosshair);
+      svg.appendChild(marker);
+      var capture = svgEl('rect', { x: MARGIN.left, y: MARGIN.top, width: PLOT_W, height: PLOT_H, fill: 'transparent', class: 'hover-capture' });
+      svg.appendChild(capture);
+      function onMove(evt) {
+        var p = svgPoint(svg, evt);
+        var ceilingVal = clampVal(xScale.invert(p.x), 1.5, 8.0);
+        var idx = bisectNearest(xs, ceilingVal);
+        var pt = mainPts[idx];
+        var px = xScale(pt[0]), py = yScale(pt[1]);
+        crosshair.setAttribute('x1', px); crosshair.setAttribute('x2', px);
+        crosshair.setAttribute('y1', MARGIN.top); crosshair.setAttribute('y2', MARGIN.top + PLOT_H);
+        crosshair.setAttribute('visibility', 'visible');
+        marker.setAttribute('cx', px); marker.setAttribute('cy', py);
+        marker.setAttribute('visibility', 'visible');
+        tooltip.show(['Current year (' + params.year + ')', 'Ceiling: Rs ' + pt[0].toFixed(2) + '/unit', 'LCOH: Rs ' + pt[1].toFixed(1) + '/kg'], px, py);
+      }
+      function onLeave() {
+        crosshair.setAttribute('visibility', 'hidden');
+        marker.setAttribute('visibility', 'hidden');
+        tooltip.hide();
+      }
+      capture.addEventListener('pointermove', onMove);
+      capture.addEventListener('pointerleave', onLeave);
+      tooltip = makeTooltip(svg);
+
       fillTable(els.chart1.table, ['Ceiling (Rs/unit)', 'LCOH (Rs/kg)'],
         mainPts.filter(function (_, i) { return i % 20 === 0; }).map(function (p) { return [p[0].toFixed(2), p[1].toFixed(1)]; }));
     }
@@ -919,11 +1060,19 @@
       var total = result.lcoh;
       var xScale = scaleLinear([0, total], [MARGIN.left, MARGIN.left + PLOT_W]);
       var barY = MARGIN.top + PLOT_H / 2 - 35;
+      var tooltip; // assigned last so its <g> paints on top of everything else
       var acc = 0;
       comps.forEach(function (c) {
         var x0 = xScale(acc);
         var x1 = xScale(acc + c[1]);
-        svg.appendChild(svgEl('rect', { x: x0, y: barY, width: Math.max(0, x1 - x0), height: 72, fill: c[2] }));
+        var rect = svgEl('rect', { x: x0, y: barY, width: Math.max(0, x1 - x0), height: 72, fill: c[2], class: 'hover-capture' });
+        rect.addEventListener('pointermove', function (evt) {
+          var p = svgPoint(svg, evt);
+          var pct = total > 0 ? (c[1] / total) * 100 : 0;
+          tooltip.show([c[0], 'Rs ' + c[1].toFixed(2) + '/kg', pct.toFixed(1) + '% of LCOH'], p.x, barY);
+        });
+        rect.addEventListener('pointerleave', function () { tooltip.hide(); });
+        svg.appendChild(rect);
         acc += c[1];
       });
       svg.appendChild(svgEl('line', { x1: MARGIN.left, y1: barY + 82, x2: MARGIN.left + PLOT_W, y2: barY + 82, stroke: 'currentColor' }));
@@ -943,6 +1092,7 @@
         legend.appendChild(t);
       });
       svg.appendChild(legend);
+      tooltip = makeTooltip(svg);
 
       fillTable(els.chart2.table, ['Component', 'Rs/kg'], comps.map(function (c) { return [c[0], c[1].toFixed(2)]; }));
     }
@@ -975,6 +1125,41 @@
       var cy = yScale(ceiling);
       svg.appendChild(svgEl('line', { x1: MARGIN.left, y1: cy, x2: MARGIN.left + PLOT_W, y2: cy, stroke: COLORS[1], 'stroke-dasharray': '4 3' }));
 
+      drawLegend(svg, [
+        { type: 'line', color: COLORS[0], width: 2, label: 'Landed price duration curve' },
+        { type: 'box', color: COLORS[0], label: 'Hours the plant runs' },
+        { type: 'line', color: COLORS[1], width: 1, dash: '4 3', label: 'Your ceiling' },
+      ], MARGIN.left, 6, PLOT_W);
+
+      var xs = pts.map(function (p) { return p[0]; });
+      var tooltip;
+      var marker = svgEl('circle', { class: 'hover-marker', r: '4.5', visibility: 'hidden' });
+      var crosshair = svgEl('line', { class: 'crosshair-line', visibility: 'hidden' });
+      svg.appendChild(crosshair);
+      svg.appendChild(marker);
+      var capture = svgEl('rect', { x: MARGIN.left, y: MARGIN.top, width: PLOT_W, height: PLOT_H, fill: 'transparent', class: 'hover-capture' });
+      svg.appendChild(capture);
+      capture.addEventListener('pointermove', function (evt) {
+        var p = svgPoint(svg, evt);
+        var hrs = clampVal(xScale.invert(p.x), 0, 8760);
+        var idx = bisectNearest(xs, hrs);
+        var pt = pts[idx];
+        var px = xScale(pt[0]), py = yScale(pt[1]);
+        crosshair.setAttribute('x1', px); crosshair.setAttribute('x2', px);
+        crosshair.setAttribute('y1', MARGIN.top); crosshair.setAttribute('y2', MARGIN.top + PLOT_H);
+        crosshair.setAttribute('visibility', 'visible');
+        marker.setAttribute('cx', px); marker.setAttribute('cy', py);
+        marker.setAttribute('visibility', 'visible');
+        var running = pt[1] <= ceiling ? 'running' : 'not running';
+        tooltip.show(['Hours: ' + pt[0].toFixed(0) + ' h', 'Landed price: Rs ' + pt[1].toFixed(3) + '/unit', '(' + running + ')'], px, py);
+      });
+      capture.addEventListener('pointerleave', function () {
+        crosshair.setAttribute('visibility', 'hidden');
+        marker.setAttribute('visibility', 'hidden');
+        tooltip.hide();
+      });
+      tooltip = makeTooltip(svg);
+
       fillTable(els.chart3.table, ['Hours', 'Landed price (Rs/unit)'],
         pts.filter(function (_, i) { return i % 25 === 0; }).map(function (p) { return [p[0].toFixed(0), p[1].toFixed(3)]; }));
     }
@@ -998,11 +1183,18 @@
       drawAxes(svg, xScale, [0, 12], yScale, [0, 100], 'Month', 'Utilisation (%)',
         function (v) { var idx = Math.round(v); return monthNames[idx] || ''; }, function (v) { return v.toFixed(0); });
       var barW = PLOT_W / 12 * 0.7;
+      var tooltip;
       pct.forEach(function (p, i) {
         var x = xScale(i) + (PLOT_W / 12 - barW) / 2;
         var y = yScale(p);
-        svg.appendChild(svgEl('rect', { x: x, y: y, width: barW, height: (MARGIN.top + PLOT_H) - y, fill: COLORS[0] }));
+        var rect = svgEl('rect', { x: x, y: y, width: barW, height: (MARGIN.top + PLOT_H) - y, fill: COLORS[0], class: 'hover-capture' });
+        rect.addEventListener('pointermove', function () {
+          tooltip.show([monthNames[i], 'Utilisation: ' + p.toFixed(1) + '%', monthly[i].toFixed(0) + ' h of ' + yearData.month_total_hours[i].toFixed(0) + ' h'], x + barW / 2, y);
+        });
+        rect.addEventListener('pointerleave', function () { tooltip.hide(); });
+        svg.appendChild(rect);
       });
+      tooltip = makeTooltip(svg);
       var titleEl = els.chart4.root.querySelector('figcaption');
       titleEl.textContent = 'Monthly utilisation (snapped to nearest Rs ' + snapped + '/unit threshold)';
 
@@ -1023,15 +1215,28 @@
       var xScale = scaleLinear([0, 4], [MARGIN.left, MARGIN.left + PLOT_W]);
       var yScale = scaleLinear([0, yMax], [MARGIN.top + PLOT_H, MARGIN.top]);
       drawAxes(svg, xScale, [0, 4], yScale, [0, yMax], 'Price year', 'LCOH (Rs/kg)',
-        function (v) { var idx = Math.floor(v); return API.YEAR_KEYS[idx] ? API.YEAR_KEYS[idx].replace('AY', '') : ''; },
-        function (v) { return v.toFixed(0); });
+        function (v) { var idx = Math.round(v - 0.5); return API.YEAR_KEYS[idx] ? API.YEAR_KEYS[idx].replace('AY', '') : ''; },
+        function (v) { return v.toFixed(0); },
+        [0.5, 1.5, 2.5, 3.5]);
+      drawLegend(svg, [
+        { type: 'box', color: COLORS[3], label: 'Current year' },
+        { type: 'box', color: COLORS[0], label: 'Other years' },
+      ], MARGIN.left, 6, PLOT_W);
+
       var barW = PLOT_W / 4 * 0.6;
+      var tooltip;
       values.forEach(function (v, i) {
         var x = xScale(i) + (PLOT_W / 4 - barW) / 2;
         var y = yScale(v.lcoh);
         var isCurrent = v.year === params.year;
-        svg.appendChild(svgEl('rect', { x: x, y: y, width: barW, height: (MARGIN.top + PLOT_H) - y, fill: isCurrent ? COLORS[3] : COLORS[0] }));
+        var rect = svgEl('rect', { x: x, y: y, width: barW, height: (MARGIN.top + PLOT_H) - y, fill: isCurrent ? COLORS[3] : COLORS[0], class: 'hover-capture' });
+        rect.addEventListener('pointermove', function () {
+          tooltip.show([v.year + (isCurrent ? ' (current)' : ''), 'LCOH: Rs ' + v.lcoh.toFixed(1) + '/kg'], x + barW / 2, y);
+        });
+        rect.addEventListener('pointerleave', function () { tooltip.hide(); });
+        svg.appendChild(rect);
       });
+      tooltip = makeTooltip(svg);
       fillTable(els.chart5.table, ['Year', 'LCOH (Rs/kg)'], values.map(function (v) { return [v.year, v.lcoh.toFixed(1)]; }));
     }
 
@@ -1047,23 +1252,106 @@
         priceByYear.push(block.price);
         rateBaseByYear.push(reprice.openingRateBaseByYear[t] / 1e7);
       }
+      // This chart has two series on two different scales (Rs/kg and Rs cr),
+      // so it gets its own narrower plot width to leave room for a right-hand
+      // axis, rather than sharing the other charts' single-axis PLOT_W.
+      var rightAxisWidth = 96;
+      var plotW6 = CHART_W - MARGIN.left - rightAxisWidth;
       var yMax = Math.max.apply(null, priceByYear) * 1.15;
-      var xScale = scaleLinear([1, plantLife], [MARGIN.left, MARGIN.left + PLOT_W]);
+      var xScale = scaleLinear([1, plantLife], [MARGIN.left, MARGIN.left + plotW6]);
       var yScale = scaleLinear([0, yMax], [MARGIN.top + PLOT_H, MARGIN.top]);
-      drawAxes(svg, xScale, [1, plantLife], yScale, [0, yMax], 'Year', 'Contract price (Rs/kg)',
-        function (v) { return v.toFixed(0); }, function (v) { return v.toFixed(0); });
+      var rbMax = Math.max.apply(null, rateBaseByYear) || 1;
+      var yScale2 = scaleLinear([0, rbMax * 1.15], [MARGIN.top + PLOT_H, MARGIN.top]);
+
+      // Bottom + left axes (price, left-hand scale)
+      var g = svgEl('g', { class: 'axes' });
+      g.appendChild(svgEl('line', { x1: MARGIN.left, y1: MARGIN.top + PLOT_H, x2: MARGIN.left + plotW6, y2: MARGIN.top + PLOT_H, stroke: 'currentColor' }));
+      g.appendChild(svgEl('line', { x1: MARGIN.left, y1: MARGIN.top, x2: MARGIN.left, y2: MARGIN.top + PLOT_H, stroke: 'currentColor' }));
+      var xTicks = Math.min(plantLife - 1, 10) || 1;
+      for (var i = 0; i <= xTicks; i++) {
+        var xv = Math.round(1 + (i / xTicks) * (plantLife - 1));
+        var px2 = xScale(xv);
+        g.appendChild(svgEl('line', { x1: px2, y1: MARGIN.top + PLOT_H, x2: px2, y2: MARGIN.top + PLOT_H + 5, stroke: 'currentColor' }));
+        var xt = svgEl('text', { x: px2, y: MARGIN.top + PLOT_H + 22, 'text-anchor': 'middle', class: 'axis-label' });
+        xt.textContent = String(xv);
+        g.appendChild(xt);
+      }
+      for (var j = 0; j <= 5; j++) {
+        var yv = (yMax / 5) * j;
+        var py2 = yScale(yv);
+        g.appendChild(svgEl('line', { x1: MARGIN.left - 5, y1: py2, x2: MARGIN.left, y2: py2, stroke: 'currentColor' }));
+        var yt = svgEl('text', { x: MARGIN.left - 10, y: py2 + 4, 'text-anchor': 'end', class: 'axis-label' });
+        yt.textContent = yv.toFixed(0);
+        g.appendChild(yt);
+      }
+      var xl = svgEl('text', { x: MARGIN.left + plotW6 / 2, y: CHART_H - 6, 'text-anchor': 'middle', class: 'axis-title' });
+      xl.textContent = 'Year';
+      g.appendChild(xl);
+      var yl = svgEl('text', { x: 16, y: MARGIN.top + PLOT_H / 2, 'text-anchor': 'middle', class: 'axis-title', transform: 'rotate(-90 16 ' + (MARGIN.top + PLOT_H / 2) + ')' });
+      yl.textContent = 'Contract price (Rs/kg)';
+      g.appendChild(yl);
+      svg.appendChild(g);
+
+      // Right axis (opening rate base, Rs cr)
+      var rightX = MARGIN.left + plotW6;
+      var gr = svgEl('g', { class: 'axes-right' });
+      for (var k = 0; k <= 5; k++) {
+        var rv = (rbMax * 1.15 / 5) * k;
+        var pry = yScale2(rv);
+        gr.appendChild(svgEl('line', { x1: rightX, y1: pry, x2: rightX + 5, y2: pry, stroke: COLORS[1] }));
+        var rt = svgEl('text', { x: rightX + 10, y: pry + 4, 'text-anchor': 'start', class: 'axis-label' });
+        rt.textContent = rv.toFixed(1);
+        gr.appendChild(rt);
+      }
+      var ryl = svgEl('text', {
+        x: CHART_W - 8, y: MARGIN.top + PLOT_H / 2, 'text-anchor': 'middle', class: 'axis-title',
+        transform: 'rotate(90 ' + (CHART_W - 8) + ' ' + (MARGIN.top + PLOT_H / 2) + ')',
+      });
+      ryl.textContent = 'Opening rate base (Rs cr)';
+      gr.appendChild(ryl);
+      svg.appendChild(gr);
 
       var stepPts = [];
-      for (var i = 0; i < priceByYear.length; i++) {
-        stepPts.push([i + 1, priceByYear[i]]);
-        stepPts.push([i + 2, priceByYear[i]]);
+      for (var si = 0; si < priceByYear.length; si++) {
+        stepPts.push([si + 1, priceByYear[si]]);
+        stepPts.push([si + 2, priceByYear[si]]);
       }
       svg.appendChild(svgEl('path', { d: pointsToPath(stepPts, xScale, yScale), fill: 'none', stroke: COLORS[0], 'stroke-width': '2' }));
 
-      var rbMax = Math.max.apply(null, rateBaseByYear) || 1;
-      var yScale2 = scaleLinear([0, rbMax * 1.15], [MARGIN.top + PLOT_H, MARGIN.top]);
-      var rbPts = rateBaseByYear.map(function (v, i) { return [i + 1, v]; });
+      var rbPts = rateBaseByYear.map(function (v, i2) { return [i2 + 1, v]; });
       svg.appendChild(svgEl('path', { d: pointsToPath(rbPts, xScale, yScale2), fill: 'none', stroke: COLORS[1], 'stroke-width': '2', 'stroke-dasharray': '5 3' }));
+
+      drawLegend(svg, [
+        { type: 'line', color: COLORS[0], width: 2, label: 'Contract price (Rs/kg, left axis)' },
+        { type: 'line', color: COLORS[1], width: 2, dash: '5 3', label: 'Opening rate base (Rs cr, right axis)' },
+      ], MARGIN.left, 6, plotW6);
+
+      var xs6 = priceByYear.map(function (_, i2) { return i2 + 1; });
+      var tooltip;
+      var marker = svgEl('circle', { class: 'hover-marker', r: '4.5', visibility: 'hidden' });
+      var crosshair = svgEl('line', { class: 'crosshair-line', visibility: 'hidden' });
+      svg.appendChild(crosshair);
+      svg.appendChild(marker);
+      var capture = svgEl('rect', { x: MARGIN.left, y: MARGIN.top, width: plotW6, height: PLOT_H, fill: 'transparent', class: 'hover-capture' });
+      svg.appendChild(capture);
+      capture.addEventListener('pointermove', function (evt) {
+        var p = svgPoint(svg, evt);
+        var yearVal = clampVal(xScale.invert(p.x), 1, plantLife);
+        var idx = bisectNearest(xs6, yearVal);
+        var px3 = xScale(xs6[idx]), py3 = yScale(priceByYear[idx]);
+        crosshair.setAttribute('x1', px3); crosshair.setAttribute('x2', px3);
+        crosshair.setAttribute('y1', MARGIN.top); crosshair.setAttribute('y2', MARGIN.top + PLOT_H);
+        crosshair.setAttribute('visibility', 'visible');
+        marker.setAttribute('cx', px3); marker.setAttribute('cy', py3);
+        marker.setAttribute('visibility', 'visible');
+        tooltip.show(['Year ' + xs6[idx], 'Contract price: Rs ' + priceByYear[idx].toFixed(1) + '/kg', 'Rate base: Rs ' + rateBaseByYear[idx].toFixed(2) + ' cr'], px3, py3);
+      });
+      capture.addEventListener('pointerleave', function () {
+        crosshair.setAttribute('visibility', 'hidden');
+        marker.setAttribute('visibility', 'hidden');
+        tooltip.hide();
+      });
+      tooltip = makeTooltip(svg);
 
       fillTable(els.chart6.table, ['Year', 'Contract price (Rs/kg)', 'Opening rate base (Rs cr)'],
         priceByYear.map(function (p, i) { return [i + 1, p.toFixed(1), rateBaseByYear[i].toFixed(2)]; }));
