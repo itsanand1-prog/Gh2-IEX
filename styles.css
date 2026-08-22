@@ -198,12 +198,12 @@ summary { cursor: pointer; font-weight: 700; }
 .buildup-list { margin: 0.5rem 0 0; padding-left: 1.25rem; }
 .buildup-list li { margin-bottom: 0.3rem; }
 
-.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
-.chart-figure { background: var(--panel); border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.75rem; margin: 0; }
-.chart-figure figcaption { font-weight: 700; margin-bottom: 0.4rem; }
-.chart-figure svg { width: 100%; height: auto; color: var(--text); }
-.axis-label { font-size: 9px; fill: var(--muted); }
-.axis-title { font-size: 11px; fill: var(--text); font-weight: 600; }
+.charts { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-bottom: 1rem; }
+.chart-figure { background: var(--panel); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; margin: 0; }
+.chart-figure figcaption { font-weight: 700; font-size: 1.05rem; margin-bottom: 0.5rem; }
+.chart-figure svg { width: 100%; height: auto; max-width: 900px; display: block; margin: 0 auto; color: var(--text); }
+.axis-label { font-size: 13px; fill: var(--muted); }
+.axis-title { font-size: 15px; fill: var(--text); font-weight: 600; }
 
 .reprice-summary p { margin: 0.4rem 0; }
 
