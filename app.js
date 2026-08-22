@@ -533,7 +533,7 @@
 
     function chartFigure(id, title) {
       var svg = svgEl('svg', {
-        id: id, viewBox: '0 0 640 360', role: 'img', 'aria-label': title,
+        id: id, viewBox: '0 0 ' + CHART_W + ' ' + CHART_H, role: 'img', 'aria-label': title,
         preserveAspectRatio: 'xMidYMid meet', focusable: 'true', tabindex: '0',
       });
       var caption = el('figcaption', { text: title });
@@ -772,8 +772,8 @@
     // ------------------------------------------------------------------
     // Charts
     // ------------------------------------------------------------------
-    var CHART_W = 640, CHART_H = 360;
-    var MARGIN = { top: 16, right: 16, bottom: 40, left: 56 };
+    var CHART_W = 760, CHART_H = 440;
+    var MARGIN = { top: 24, right: 24, bottom: 54, left: 78 };
     var PLOT_W = CHART_W - MARGIN.left - MARGIN.right;
     var PLOT_H = CHART_H - MARGIN.top - MARGIN.bottom;
     var COLORS = ['#1b6ec2', '#c2571b', '#2b8a3e', '#9c36b5', '#868e96'];
@@ -805,25 +805,25 @@
       for (var i = 0; i <= xTicks; i++) {
         var xv = xDomain[0] + (i / xTicks) * (xDomain[1] - xDomain[0]);
         var px = xScale(xv);
-        g.appendChild(svgEl('line', { x1: px, y1: MARGIN.top + PLOT_H, x2: px, y2: MARGIN.top + PLOT_H + 4, stroke: 'currentColor' }));
-        var t1 = svgEl('text', { x: px, y: MARGIN.top + PLOT_H + 16, 'text-anchor': 'middle', class: 'axis-label' });
+        g.appendChild(svgEl('line', { x1: px, y1: MARGIN.top + PLOT_H, x2: px, y2: MARGIN.top + PLOT_H + 5, stroke: 'currentColor' }));
+        var t1 = svgEl('text', { x: px, y: MARGIN.top + PLOT_H + 22, 'text-anchor': 'middle', class: 'axis-label' });
         t1.textContent = xTickFmt(xv);
         g.appendChild(t1);
       }
       for (var j = 0; j <= yTicks; j++) {
         var yv = yDomain[0] + (j / yTicks) * (yDomain[1] - yDomain[0]);
         var py = yScale(yv);
-        g.appendChild(svgEl('line', { x1: MARGIN.left - 4, y1: py, x2: MARGIN.left, y2: py, stroke: 'currentColor' }));
-        var t2 = svgEl('text', { x: MARGIN.left - 8, y: py + 3, 'text-anchor': 'end', class: 'axis-label' });
+        g.appendChild(svgEl('line', { x1: MARGIN.left - 5, y1: py, x2: MARGIN.left, y2: py, stroke: 'currentColor' }));
+        var t2 = svgEl('text', { x: MARGIN.left - 10, y: py + 4, 'text-anchor': 'end', class: 'axis-label' });
         t2.textContent = yTickFmt(yv);
         g.appendChild(t2);
       }
-      var xl = svgEl('text', { x: MARGIN.left + PLOT_W / 2, y: CHART_H - 4, 'text-anchor': 'middle', class: 'axis-title' });
+      var xl = svgEl('text', { x: MARGIN.left + PLOT_W / 2, y: CHART_H - 6, 'text-anchor': 'middle', class: 'axis-title' });
       xl.textContent = xLabel;
       g.appendChild(xl);
       var yl = svgEl('text', {
-        x: 12, y: MARGIN.top + PLOT_H / 2, 'text-anchor': 'middle', class: 'axis-title',
-        transform: 'rotate(-90 12 ' + (MARGIN.top + PLOT_H / 2) + ')',
+        x: 16, y: MARGIN.top + PLOT_H / 2, 'text-anchor': 'middle', class: 'axis-title',
+        transform: 'rotate(-90 16 ' + (MARGIN.top + PLOT_H / 2) + ')',
       });
       yl.textContent = yLabel;
       g.appendChild(yl);
@@ -918,27 +918,27 @@
       ];
       var total = result.lcoh;
       var xScale = scaleLinear([0, total], [MARGIN.left, MARGIN.left + PLOT_W]);
-      var barY = MARGIN.top + PLOT_H / 2 - 30;
+      var barY = MARGIN.top + PLOT_H / 2 - 35;
       var acc = 0;
       comps.forEach(function (c) {
         var x0 = xScale(acc);
         var x1 = xScale(acc + c[1]);
-        svg.appendChild(svgEl('rect', { x: x0, y: barY, width: Math.max(0, x1 - x0), height: 60, fill: c[2] }));
+        svg.appendChild(svgEl('rect', { x: x0, y: barY, width: Math.max(0, x1 - x0), height: 72, fill: c[2] }));
         acc += c[1];
       });
-      svg.appendChild(svgEl('line', { x1: MARGIN.left, y1: barY + 70, x2: MARGIN.left + PLOT_W, y2: barY + 70, stroke: 'currentColor' }));
+      svg.appendChild(svgEl('line', { x1: MARGIN.left, y1: barY + 82, x2: MARGIN.left + PLOT_W, y2: barY + 82, stroke: 'currentColor' }));
       for (var i = 0; i <= 5; i++) {
         var v = (total / 5) * i;
         var px = xScale(v);
-        var t = svgEl('text', { x: px, y: barY + 86, 'text-anchor': 'middle', class: 'axis-label' });
+        var t = svgEl('text', { x: px, y: barY + 100, 'text-anchor': 'middle', class: 'axis-label' });
         t.textContent = v.toFixed(0);
         svg.appendChild(t);
       }
-      var legend = svgEl('g', { transform: 'translate(' + MARGIN.left + ',' + (barY - 20) + ')' });
+      var legend = svgEl('g', { transform: 'translate(' + MARGIN.left + ',' + (barY - 26) + ')' });
       comps.forEach(function (c, i) {
-        var gx = i * 120;
-        legend.appendChild(svgEl('rect', { x: gx, y: 0, width: 10, height: 10, fill: c[2] }));
-        var t = svgEl('text', { x: gx + 14, y: 9, class: 'axis-label' });
+        var gx = i * 135;
+        legend.appendChild(svgEl('rect', { x: gx, y: 0, width: 13, height: 13, fill: c[2] }));
+        var t = svgEl('text', { x: gx + 18, y: 11, class: 'axis-label' });
         t.textContent = c[0];
         legend.appendChild(t);
       });
