@@ -130,6 +130,29 @@ select {
 #reset-btn:hover { background: var(--bg); }
 
 .note { font-size: 0.8rem; color: var(--muted); margin: 0.2rem 0 0.9rem; }
+.note-exception {
+  background: var(--caution-bg);
+  color: var(--caution-ink);
+  border-radius: 0.3rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.subgroup { margin-top: 1rem; }
+.subgroup-caption { margin: 0 0 0.75rem; }
+.readout {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--info-ink);
+  background: var(--info-bg);
+  border-radius: 0.3rem;
+  padding: 0.35rem 0.55rem;
+  margin: 0.2rem 0 0;
+}
+
+.gross-row td { border-top: 1px solid var(--text); font-weight: 600; }
+/* Subsidies read as a deduction by shape and sign, not by colour alone. */
+.subsidy-row td { font-style: italic; }
+.subsidy-detail { margin-top: 0.75rem; }
 
 fieldset { border: 1px solid var(--border); border-radius: 0.4rem; margin-bottom: 1rem; padding: 0.75rem; }
 legend { font-weight: 700; padding: 0 0.4rem; font-size: 0.9rem; }
@@ -198,21 +221,46 @@ summary { cursor: pointer; font-weight: 700; }
 .buildup-list { margin: 0.5rem 0 0; padding-left: 1.25rem; }
 .buildup-list li { margin-bottom: 0.3rem; }
 
-.charts { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-bottom: 1rem; }
-.chart-figure { background: var(--panel); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; margin: 0; }
-.chart-figure figcaption { font-weight: 700; font-size: 1.05rem; margin-bottom: 0.5rem; }
-.chart-figure svg { width: 100%; height: auto; max-width: 900px; display: block; margin: 0 auto; color: var(--text); }
-.axis-label { font-size: 13px; fill: var(--muted); }
+/* One chart per row, full content width, at every breakpoint. A side-by-side
+   grid is what made these illegible before. */
+.charts { display: grid; grid-template-columns: 1fr; gap: 1.5rem; margin-bottom: 1rem; min-width: 0; }
+/* min-width:0 is load-bearing: as a grid item this would otherwise default to
+   min-width:auto and refuse to shrink below the intrinsic width of the SVG it
+   contains, so the container could never get narrower than the last render and
+   the ResizeObserver would never see a change. */
+.chart-figure {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 0.5rem; padding: 1rem; margin: 0; min-width: 0;
+}
+.chart-figure figcaption { font-weight: 500; font-size: 17px; margin-bottom: 0.6rem; line-height: 1.35; }
+/* The SVG carries real pixel width/height set by app.js — no viewBox scaling,
+   so a font-size of 14 renders as 14 physical pixels. */
+.chart-body { width: 100%; overflow-x: auto; }
+.chart-figure svg { display: block; color: var(--text); }
+.chart-caption { font-size: 15px; line-height: 1.5; color: var(--text); margin: 0.6rem 0 0; max-width: 78ch; }
+.table-caption { font-size: 14px; color: var(--muted); margin: 0.5rem 0 0; max-width: 78ch; }
+
+.axis-label { font-size: 14px; fill: var(--muted); }
 .axis-title { font-size: 15px; fill: var(--text); font-weight: 600; }
-.legend .axis-label { font-size: 12.5px; }
+.legend .axis-label { font-size: 14px; fill: var(--text); }
+.value-label { font-size: 14px; fill: var(--text); }
+.value-label.on-fill { fill: #ffffff; font-weight: 600; }
+.series-label { font-size: 14px; fill: var(--text); font-weight: 600; }
+.gridline { stroke: var(--border); stroke-width: 1; }
+
+.plaque-bg { fill: var(--panel); fill-opacity: 0.92; stroke: var(--border); stroke-width: 1; }
+.plaque-text { font-size: 14px; fill: var(--text); font-weight: 600; }
+.plaque-current .plaque-bg { stroke: var(--accent); }
+.plaque-warn .plaque-bg { fill: var(--caution-bg); stroke: var(--caution-ink); }
+.plaque-warn .plaque-text { fill: var(--caution-ink); }
 
 .hover-capture { cursor: crosshair; }
 .hover-capture:hover { opacity: 0.92; }
 .crosshair-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
-.hover-marker { fill: var(--accent); stroke: var(--panel); stroke-width: 1.5; }
-.tooltip-bg { fill: #1a1d23; fill-opacity: 0.95; }
-.tooltip-title { fill: #ffffff; font-size: 12.5px; font-weight: 700; }
-.tooltip-line { fill: #d7dbe2; font-size: 12.5px; }
+.hover-marker { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+.tooltip-bg { fill: #1a1d23; fill-opacity: 0.96; }
+.tooltip-title { fill: #ffffff; font-size: 14px; font-weight: 700; }
+.tooltip-line { fill: #d7dbe2; font-size: 14px; }
 
 .reprice-summary p { margin: 0.4rem 0; }
 

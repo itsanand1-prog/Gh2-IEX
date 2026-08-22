@@ -79,19 +79,32 @@ t              = ceiling_landed / loss_factor − adder
 (hours, w_mcp) = interpolate(sweep[min_run], t)      // clamped, never extrapolated
 landed_avg     = (w_mcp + adder) × loss_factor
 
-annual_kg      = MW × 1000 × hours × load_factor ÷ SEC
-capex          = MW × 1000 × capex_per_kW
+kW             = MW × 1000
+annual_kg      = kW × hours × load_factor ÷ SEC
+
+capex_base     = kW × capex_per_kW
+capex_extra    = kW × additional_capex_per_kW
+capex_gross    = capex_base + capex_extra
+capex_subsidy  = kW × capex_subsidy_per_kW
+capex_net      = max(capex_gross − capex_subsidy, 0)
+
 CRF(r, N)      = r(1+r)^N / ((1+r)^N − 1),  and = 1/N when r = 0
 
-annualised_capex = (capex − capex × residual_pct / (1+r)^N) × CRF(r, N)
-annual_om        = capex × om_pct
+annualised_capex = (capex_net − capex_net × residual_pct / (1+r)^N) × CRF(r, N)
+annual_om        = capex_gross × om_pct
 stack_sinking     = CRF(r, N) × Σ stack_cost / (1+r)^(k × stack_life_hours/hours)
                                  for k = 1, 2, … while k × interval < N
 
 LCOH = (annualised_capex + annual_om + stack_sinking) ÷ annual_kg
        + SEC × landed_avg
        + water_cost_per_kg
+       + additional_opex_per_kg
+       − production_subsidy_per_kg
+       − power_subsidy_per_unit × SEC
 ```
+
+With every additional-charge and subsidy field at its default of zero, this
+reduces exactly to the original formula — asserted in the test suite.
 
 **Plant size (MW) cancels out of the LCOH entirely** — `annual_kg`, `capex`,
 `annual_om` and `stack_sinking` are all linear in MW, so the ratio is
@@ -153,8 +166,118 @@ shows them for trajectory, not as a basis on their own.
 | Residual value | 0% | Conservative default |
 | Grey H2 benchmark | Rs 250/kg | Illustrative comparison point, adjustable |
 | Plant life | 20 years | Typical electrolyser plant design life |
+| Additional capex | 0 Rs/kW | Off by default — see "Additional charges and subsidies" |
+| Additional opex | 0 | Off by default; the unit selector defaults to `Rs/unit power`, but a zero value is inert whatever the unit |
+| Capital subsidy | 0 Rs/kW | Off by default |
+| Production subsidy | 0 Rs/kg | Off by default |
+| Power subsidy | 0 Rs/unit | Off by default |
+
+## Additional charges and subsidies
+
+The default cost stack deliberately excludes several real costs, and all
+government support other than the transmission and wheeling waivers already
+embedded in the landed-cost formula. **Those exclusions are defaults, not
+hard limits of the tool** — the fields below are the mechanism for adding
+them back. Every one of them defaults to zero, so out of the box the model
+is numerically identical to the version without them, and every figure
+quoted in this README remains exact.
+
+### Additional charges (basic panel)
+
+| Field | Unit | Typical use |
+|---|---|---|
+| Additional capex | Rs/kW | Land acquisition, site infrastructure, connection deposits, anything absent from the BOP uplifts |
+| Additional opex | selectable — see below | Electricity duty, STU demand charges, insurance, working-capital carry, statutory fees |
+
+The opex field carries a unit selector because the excluded items are
+naturally quoted on different bases. The entered value is converted to
+Rs/kg before it enters the LCOH:
+
+| Selected unit | Conversion to Rs/kg | Worked example at the reference case |
+|---|---|---|
+| `Rs/kg H2` | `value` | Rs 10.00/kg → +Rs 10.00/kg |
+| `Rs/unit power` | `value × SEC` | Rs 0.10/unit × 52 → +Rs 5.20/kg |
+| `Rs/MW/year` | `value × MW ÷ annual_kg` | Rs 10 lakh × 4.599 ÷ 500,000 → +Rs 9.20/kg |
+| `Rs/year` (lump sum) | `value ÷ annual_kg` | Rs 50 lakh ÷ 500,000 → +Rs 10.00/kg |
+| `% of capex/year` | `value/100 × capex_gross ÷ annual_kg` | 0.4% × Rs 28.52 cr ÷ 500,000 → +Rs 2.28/kg |
+
+The `Rs/unit power` conversion multiplies by SEC, which is exactly
+`annual_units ÷ annual_kg`. That is the correct treatment for a per-unit
+charge such as electricity duty: it applies only to energy actually drawn,
+and therefore only during operating hours. Nameplate hours are never used
+in this conversion.
+
+The dashboard shows a live `= Rs X/kg` readout beside the field, because
+these conversions are otherwise opaque — a user entering Rs 0.10/unit has
+no intuition for its effect on LCOH until they see it in per-kg terms.
+
+### Subsidies and incentives (Assumptions panel)
+
+| Field | Unit | Enters the model as | Typical use |
+|---|---|---|---|
+| Capital subsidy | Rs/kW | Reduction to capex at year zero, before the CRF | SIGHT Component II, state capital subsidy |
+| Production subsidy | Rs/kg H2 | Direct deduction from LCOH | GST reimbursement, per-kg production incentive |
+| Power subsidy | Rs/unit power | Deduction of `value × SEC` from LCOH | State power tariff rebate, duty exemption |
+
+All three are independent and simultaneously applicable. **GST
+reimbursement goes in the production subsidy field** — it is economically
+an offset per unit of output, so there is deliberately no separate GST
+field.
+
+### Design decisions
+
+These materially affect the result, and are documented because anyone
+reconciling this model against their own spreadsheet will otherwise find
+unexplained differences.
+
+1. **O&M is charged on gross capex**, including any additional capex, and
+   is *not* reduced by a capital subsidy. The physical asset needs
+   maintaining regardless of who funded it; a capital grant changes the
+   financing, not the maintenance burden.
+2. **Additional capex attracts O&M at the same percentage** as base capex.
+   If your additional capex is mostly land, which carries little
+   maintenance, this overstates O&M — lower the O&M percentage to
+   compensate.
+3. **A capital subsidy is front-loaded** — deducted at year zero, before
+   the CRF is applied, rather than modelled as a disbursement in a later
+   year. A subsidy actually received later is worth less than this implies.
+   If the subsidy exceeds gross capex, net capex clamps to zero and the
+   dashboard warns.
+4. **Residual value is a percentage of net capex**, following the Ind AS 20
+   convention under which a capital grant reduces the asset's carrying
+   amount. This also prevents a large subsidy plus a high residual
+   percentage from producing a negative capital recovery charge.
+5. **Stack cost is unaffected** by additional capex or by any subsidy — it
+   derives from the base electrolyser cost only, and a subsidy on the
+   initial build does not recur at replacement.
+
+Subsidies are allowed to drive LCOH negative at extreme inputs. The value
+is not clamped; the dashboard displays it and flags that subsidies exceed
+the gross cost of production.
+
+In the repricing module the rate base opens at **net** capex, since a
+capital subsidy reduces the balance the developer earns a return on, while
+the O&M line still uses gross. Additional capex the developer actually
+deployed does enter the rate base.
+
+### Effect on MW-invariance
+
+Every field above is either proportional to MW (Rs/kW, Rs/MW/year, % of
+capex) or carries no MW term at all (Rs/kg, Rs/unit), so **MW-invariance
+survives all of them** — with one exception. The `Rs/year` lump sum is a
+fixed annual cost, so spreading it over more production gives a lower
+Rs/kg and LCOH falls as MW rises. That is correct behaviour, not a
+modelling error, but it means plant size is no longer a free variable and
+the optimal ceiling shifts slightly with MW. The dashboard flags this on
+screen whenever that unit is selected with a non-zero value, and the test
+suite asserts it explicitly.
 
 ## What this does NOT model
+
+Everything in this list describes what the model omits **by default**. The
+additional-charges and subsidy fields documented above are the mechanism
+for adding several of them back — the omissions are defaults, not hard
+limits of the tool. Items marked ✎ can be entered directly.
 
 - No storage or battery — the plant only runs when the live block price
   clears the ceiling, with no ability to shift or firm output.
@@ -162,12 +285,16 @@ shows them for trajectory, not as a basis on their own.
 - No price escalation — all figures are real (inflation-adjusted); power is
   held at the chosen representative historical year, not forecast forward.
 - Only Gujarat and Rajasthan are modelled.
-- **No electricity duty.**
+- **No electricity duty.** ✎ Enter as additional opex in `Rs/unit power`.
 - **No STU demand charges** — roughly Rs 0.30–0.35/unit for EHV-connected
   buyers at high load factor in practice. This is material and is excluded
-  here.
-- No SIGHT (or any other) subsidy.
-- No GST, land cost, insurance, or working capital.
+  here. ✎ Enter as additional opex in `Rs/unit power`.
+- No SIGHT (or any other) subsidy. ✎ Enter SIGHT Component II as a capital
+  subsidy in Rs/kW.
+- No GST, land cost, insurance, or working capital. ✎ GST reimbursement
+  goes in the production subsidy field; land in additional capex;
+  insurance and working-capital carry as additional opex (`% of capex/year`
+  or `Rs/year`).
 - Four years of price history is a thin statistical basis for a
   twenty-year investment decision, and the low-price regime the tool
   highlights is itself only about two and a half years old — treat the
