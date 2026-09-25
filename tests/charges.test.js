@@ -6,6 +6,14 @@ var F = require('./framework.js');
 var M = require(path.join(__dirname, '..', 'model.js'));
 var DATA = require(path.join(__dirname, '..', 'data.json'));
 
+// The specification states every reference case and optimum at min-run 2 h,
+// which is sweep key "8" (2 h = 8 blocks of 15 minutes). This is also the
+// application's default. Using the wrong key here still reproduces the
+// published LCOH -- LCOH barely moves with min-run -- but throws the
+// published operating HOURS out by ~100 h across the reference set, which is
+// exactly how a wrong default slipped through before.
+var REF_SWEEP = '8';
+
 var describe = F.describe, test = F.test, assert = F.assert, assertClose = F.assertClose;
 
 var DEFAULTS = {
@@ -28,7 +36,7 @@ function run(yearKey, state, ceiling, overrides) {
   var yd = DATA.years[yearKey];
   var sd = DATA.states[state];
   var c = Object.assign({}, DEFAULTS, overrides || {});
-  return M.computeLCOH(yd.sweep['2'], sd.adder, sd.loss_factor, ceiling, c);
+  return M.computeLCOH(yd.sweep[REF_SWEEP], sd.adder, sd.loss_factor, ceiling, c);
 }
 
 // Base case used by every worked case below.
@@ -201,7 +209,7 @@ describe('Property: MW invariance holds with the new fields populated', function
 
   function optimumAt(mw, extra) {
     var c = Object.assign({}, DEFAULTS, { MW: mw, N: 20 }, extra || {});
-    return M.findOptimum(yd.sweep['2'], sd.adder, sd.loss_factor, c);
+    return M.findOptimum(yd.sweep[REF_SWEEP], sd.adder, sd.loss_factor, c);
   }
 
   test('with every new field at zero', function () {

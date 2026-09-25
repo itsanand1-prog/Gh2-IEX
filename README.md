@@ -158,7 +158,7 @@ shows them for trajectory, not as a basis on their own.
 | **All-in capex (computed)** | **Rs 62,010/kW** | 39,000 × (1 + sum of the above) |
 | SEC | 52 kWh/kg | Reference alkaline electrolyser efficiency at rated load |
 | Load factor when running | 100% | Assumes full-rate operation whenever the plant runs |
-| Minimum run block | 0.5 h (2 blocks) | Matches the numerical reference cases used to validate this build |
+| Minimum operation time | 2 h (8 blocks) | The only setting that reproduces both the published reference LCOH *and* the published operating hours — see below |
 | Fixed O&M | 4.0% of capex/yr | Typical industry assumption |
 | Water cost | Rs 0.90/kg H₂ | Reference DM water cost at this SEC |
 | Stack cost | 40% of electrolyser capex | Reference stack cost share |
@@ -271,6 +271,38 @@ modelling error, but it means plant size is no longer a free variable and
 the optimal ceiling shifts slightly with MW. The dashboard flags this on
 screen whenever that unit is selected with a non-zero value, and the test
 suite asserts it explicitly.
+
+### Minimum operation time
+
+Once started, the plant must keep running for at least this long. A stretch
+of cheap blocks shorter than the minimum is either **extended** — taking the
+cheaper of the two neighbouring blocks each time — or **discarded**, if the
+extended window no longer averages at or below your ceiling. See
+`apply_minrun` in `generate_data.py` for the exact algorithm.
+
+The setting is an electrolyser-chemistry choice, so it is exposed in the
+Assumptions panel:
+
+| Setting | Suits | Notes |
+|---|---|---|
+| 0.5 h | PEM | PEM stacks ramp and cycle quickly |
+| 1 h | PEM | A more conservative PEM assumption |
+| **2 h** | **Alkaline (default)** | Alkaline stacks ramp slowly and tolerate fewer cycles |
+| 4 h | Alkaline, conservative | Longest committed run |
+
+**Only these four values are available, and that is a data constraint rather
+than a design choice.** The min-run rule depends on which 15-minute blocks
+are adjacent *in time*, so — unlike a price ceiling — it is not invariant to
+the threshold and cannot be recomputed in the browser from the stored sweep.
+Each setting is pre-computed from the underlying price series by
+`generate_data.py`, which emits one sweep per setting. Supporting an
+arbitrary value such as 1.5 h would mean regenerating `data.js` from the
+source snapshot.
+
+Note that the choice barely moves LCOH — it is ≈ Rs 268.1/kg at the
+reference case for every setting — but it does move **operating hours**, by
+roughly 100 h across the reference set. Hours, capacity factor and the
+optimum ceiling are the figures to watch when changing it.
 
 ## What this does NOT model
 

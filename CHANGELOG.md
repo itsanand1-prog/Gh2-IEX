@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.1.0] - 2026-09-25
+
+### Fixed
+- **The minimum operation time defaulted to 0.5 h instead of 2 h.** The
+  specification states its reference cases at a 2 h minimum run, and 2 h is
+  the only setting that reproduces the published operating hours: summed
+  across the seven reference cases the error is 1 h at a 2 h minimum,
+  against 116 h at 0.5 h, 89 h at 1 h and 150 h at 4 h. The published
+  optimum ceilings match to ±0.01 at 2 h, against +0.04 to +0.06 at 0.5 h.
+  Displayed LCOH is unaffected — it is ≈ Rs 268.1/kg at the reference case
+  under every setting, which is precisely why the original test suite did
+  not catch this. Operating hours, capacity factor and the optimum ceiling
+  all shift slightly as a result of the correction.
+
+### Added
+- Regression tests that would have caught the above: the reference cases now
+  assert published **hours and capacity factor** alongside LCOH; a new suite
+  asserts that 2 h reproduces the published hours, that every other setting
+  is materially worse, and that the application's own default resolves to
+  that same sweep key.
+
+### Changed
+- "Minimum run block" is now labelled **Minimum operation time**, with each
+  option annotated by the chemistry it suits (PEM at 0.5–1 h, alkaline at
+  2–4 h) and help text explaining the extend-or-discard rule and why only
+  four values are offered.
+- README documents the setting, the chemistry choice, and the data
+  constraint that makes it a fixed four-option selector rather than a free
+  numeric input.
+
 ## [2.0.0] - 2026-08-22
 
 Implements revision 2 of the specification. `data.js`, `data.json` and
