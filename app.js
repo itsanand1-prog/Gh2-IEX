@@ -33,6 +33,10 @@
   var STATE_KEYS = ['Gujarat', 'Rajasthan'];
   var MIN_RUN_HOURS = [0.5, 1, 2, 4];
   var MIN_RUN_SWEEP_KEYS = ['2', '4', '8', '16']; // index-aligned with MIN_RUN_HOURS
+  // The min-run rule depends on which 15-minute blocks are adjacent in time, so
+  // it cannot be recomputed in the browser — it needs the raw price series.
+  // data.js ships one pre-computed sweep per setting, which is why this is a
+  // fixed four-option selector rather than a free numeric input.
   // Kept in step with GDAM_MODEL.OPEX_UNITS; duplicated here so the parameter
   // spec (and therefore the hash whitelist) does not depend on load order.
   var OPEX_UNITS = ['Rs/kg H2', 'Rs/unit power', 'Rs/MW/year', 'Rs/year', '% of capex/year'];
@@ -57,7 +61,7 @@
     { key: 'own', prop: 'ownerPct', type: 'number', min: 0, max: 60, def: 15 },
     { key: 'sec', prop: 'sec', type: 'number', min: 40, max: 70, def: 52 },
     { key: 'lf', prop: 'loadFactorPct', type: 'number', min: 50, max: 100, def: 100 },
-    { key: 'mr', prop: 'minRunHours', type: 'enum-num', options: MIN_RUN_HOURS, def: 0.5 },
+    { key: 'mr', prop: 'minRunHours', type: 'enum-num', options: MIN_RUN_HOURS, def: 2 },
     { key: 'om', prop: 'omPct', type: 'number', min: 0, max: 15, def: 4.0 },
     { key: 'wc', prop: 'waterCostPerKg', type: 'number', min: 0, max: 10, def: 0.90 },
     { key: 'sp', prop: 'stackPct', type: 'number', min: 0, max: 100, def: 40 },
@@ -275,6 +279,8 @@
     var rafHandle = null;
     var chartRafHandle = null;
     var lastState = null; // cached model output, so resize can redraw charts only
+    // Which electrolyser chemistry each minimum-operation-time setting suits.
+    var MIN_RUN_HINTS = { 0.5: 'PEM', 1: 'PEM', 2: 'alkaline', 4: 'alkaline, conservative' };
     var els = {}; // filled by buildLayout()
 
     function fmt(n, digits) {
@@ -531,12 +537,19 @@
 
       var mrSel = el('select', { id: 'in-mr' });
       API.MIN_RUN_HOURS.forEach(function (h) {
-        var opt = el('option', { value: String(h), text: h + ' h' });
+        var opt = el('option', {
+          value: String(h),
+          text: h + ' h' + (MIN_RUN_HINTS[h] ? ' — ' + MIN_RUN_HINTS[h] : ''),
+        });
         if (h === params.minRunHours) opt.selected = true;
         mrSel.appendChild(opt);
       });
       mrSel.addEventListener('change', function () { setParam('minRunHours', Number(mrSel.value)); });
-      techFieldset.appendChild(field('Minimum run block', mrSel));
+      techFieldset.appendChild(field('Minimum operation time', mrSel));
+      techFieldset.appendChild(el('p', {
+        class: 'note',
+        text: 'Once started, the plant must keep running for at least this long. A stretch of cheap blocks shorter than this is either extended to reach it — taking the cheaper neighbouring block each time — or skipped if the extended window no longer averages below your ceiling. PEM stacks ramp and cycle quickly, so 0.5–1 h is realistic for them; alkaline stacks are slower and tolerate fewer cycles, so 2–4 h is the usual assumption. Only these four values are available: the rule depends on which blocks are adjacent in time, so each setting is pre-computed from the underlying 15-minute price series rather than derived in the browser.',
+      }));
 
       techFieldset.appendChild(rangeNumberPair('in-om', 'Fixed O&M (% of capex/yr)', 0, 15, 0.1, params.omPct,
         function (v) { if (v !== null) setParam('omPct', v); }));
