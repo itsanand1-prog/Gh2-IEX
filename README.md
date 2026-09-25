@@ -375,6 +375,34 @@ NPV-neutrality, CRF identities, URL-hash round-tripping), a battery of
 documented edge cases, and a 1,000-case fuzz test of adversarial URL
 hashes. See `tests/` for the individual suites.
 
+Also compute and display: the 20-year PV-levelised price to the buyer, the
+project IRR, and NPV at the discount rate.
+
+### Reading the NPV-neutrality check
+
+The dashboard shows a validation line proving the repricing structure is
+NPV-neutral — that it changes *when* the developer is paid, not *how much*
+in present-value terms. Two things about how that comparison is framed:
+
+- It compares the PV-levelised block price against **a flat price recovering
+  the same capital over the same horizon** — N set to the plant life, with no
+  residual credit, matching what the regulatory rate base actually does. It
+  is deliberately *not* compared against the headline LCOH tile, which
+  amortises over your chosen (usually shorter) recovery period. Those two are
+  different amortisations of the same total cost, and comparing them would
+  show a gap of tens of rupees per kg on a line whose whole purpose is to
+  demonstrate agreement.
+- **Known limitation.** The flat LCOH runs a sinking fund covering every
+  stack replacement while `k × interval < N`, whereas the repricing schedule
+  follows the specification's pseudocode and adds a single replacement to the
+  rate base. The two agree exactly when there is zero or one replacement,
+  which covers the default 20-year plant life at the default 60,000-hour
+  stack. Beyond roughly 21 years they diverge by the present value of the
+  second replacement — about Rs 1.7/kg at a 30-year plant life. The dashboard
+  detects this and says so on screen rather than leaving an unexplained gap.
+  With stack cost set to zero the two agree to floating-point precision at
+  every plant life, which is asserted in the test suite.
+
 ## Security
 
 See [`SECURITY.md`](SECURITY.md). In short: zero runtime network requests,

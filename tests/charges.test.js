@@ -356,3 +356,71 @@ describe('Property: subsidies may drive LCOH negative without clamping', functio
     assertClose(res.lcoh, res.grossPerKg - res.subsidyTotalPerKg, 1e-9, 'net = gross - subsidies');
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('Repricing NPV-neutrality is stated against the right benchmark', function () {
+  // The block prices span the full plant life and the regulatory rate base
+  // credits no residual, so the comparable flat price is one recovering the
+  // same capital over the same horizon on the same terms -- N = plantLife,
+  // residual 0. Comparing against the headline LCOH instead (which amortises
+  // over the user's shorter recovery period) makes a correct model look wrong
+  // by tens of rupees per kg, which is what the dashboard used to display.
+  function neutralPair(overrides) {
+    var c = Object.assign({}, DEFAULTS, BASE, overrides);
+    var flat = base(overrides);
+    var rp = M.repricingSchedule(flat, c, 250, 3);
+    var benchC = Object.assign({}, c, { N: c.plantLife, residualPct: 0 });
+    var bench = run('AY2025-26', 'Gujarat', 4.98, benchC);
+    return { rp: rp, bench: bench, flat: flat };
+  }
+
+  [3, 5, 7, 10, 15, 20].forEach(function (N) {
+    test('N=' + N + ' with a 20-year plant life: PV-levelised matches the like-for-like flat price', function () {
+      var p = neutralPair({ N: N, plantLife: 20 });
+      assert(p.rp.ok, 'repricing must succeed');
+      assertClose(p.rp.pvLevelisedPrice, p.bench.lcoh, 1.0,
+        'PV-levelised vs flat price over the same horizon');
+    });
+  });
+
+  test('the identity is specifically against plant life, not the recovery period', function () {
+    // Guards the regression directly: at N=7 the headline LCOH is far from the
+    // PV-levelised price, and that is expected rather than a failure.
+    var p = neutralPair({ N: 7, plantLife: 20 });
+    assertClose(p.rp.pvLevelisedPrice, p.bench.lcoh, 1.0, 'against plant-life benchmark');
+    assert(Math.abs(p.rp.pvLevelisedPrice - p.flat.lcoh) > 10,
+      'the headline LCOH at N=7 should differ materially; if it does not, this test has stopped being meaningful');
+  });
+
+  test('varying plant life keeps the identity while the stack treatments agree', function () {
+    // Up to ~21 years at the default stack life there is at most one
+    // replacement, which both modules fund identically.
+    [10, 15, 20].forEach(function (pl) {
+      var p = neutralPair({ N: 7, plantLife: pl });
+      assertClose(p.rp.pvLevelisedPrice, p.bench.lcoh, 1.0, 'plantLife=' + pl);
+    });
+  });
+
+  test('capital recovery alone is exact at every plant life', function () {
+    // With no stack cost the two modules must agree to floating-point
+    // precision, which isolates capital recovery from stack financing and
+    // proves the neutrality result itself is not approximate.
+    [10, 20, 30, 40].forEach(function (pl) {
+      var p = neutralPair({ N: 7, plantLife: pl, stackPct: 0 });
+      assertClose(p.rp.pvLevelisedPrice, p.bench.lcoh, 1e-6, 'plantLife=' + pl + ' with no stack cost');
+    });
+  });
+
+  test('beyond one stack replacement the two modules diverge, by design', function () {
+    // Documented limitation rather than a defect: the flat LCOH runs a sinking
+    // fund covering every replacement while k * interval < N, whereas the
+    // specification's repricing pseudocode triggers exactly once
+    // (`if t == ceil(stack_life_hours / hours)`). At the default 20-year plant
+    // life this never bites. This test pins the behaviour so that a future
+    // change to either module is a deliberate decision, not a silent drift.
+    var p = neutralPair({ N: 7, plantLife: 30 });
+    var gap = Math.abs(p.rp.pvLevelisedPrice - p.bench.lcoh);
+    assert(gap > 1.0, 'expected the known divergence at a 30-year plant life, got Rs ' + gap.toFixed(2));
+    assert(gap < 5.0, 'divergence should stay small; a large jump means something else broke: Rs ' + gap.toFixed(2));
+  });
+});

@@ -808,7 +808,15 @@
       var reprice = null;
       if (params.reprice) {
         reprice = MODEL.repricingSchedule(result, c, params.greyBenchmark, 3);
-        renderRepriceTable(reprice, result, c);
+        // Like-for-like benchmark for the NPV-neutrality check. The block
+        // prices span the whole plant life and the rate base credits no
+        // residual, so the comparable flat price must recover the same capital
+        // over the same horizon on the same terms. Comparing against the
+        // headline LCOH instead — which amortises over the user's shorter
+        // recovery period — makes a correct model look broken by Rs 40+/kg.
+        var neutralC = Object.assign({}, c, { N: c.plantLife, residualPct: 0 });
+        var neutral = MODEL.computeLCOH(sweep, stateData.adder, stateData.loss_factor, params.ceiling, neutralC);
+        renderRepriceTable(reprice, result, c, neutral);
       }
 
       // Cached so a resize can redraw the charts at their new pixel width
@@ -1964,7 +1972,7 @@
       }));
     }
 
-    function renderRepriceTable(reprice, result, c) {
+    function renderRepriceTable(reprice, result, c, neutral) {
       clearChildren(els.repriceBody);
       if (!reprice.ok) return;
       var table = el('table', { class: 'data-table' });
@@ -1976,7 +1984,55 @@
       els.repriceBody.appendChild(table);
 
       var summary = el('div', { class: 'reprice-summary' });
-      summary.appendChild(el('p', { text: 'PV-levelised price to the buyer over ' + params.plantLife + ' years: Rs ' + fmt(reprice.pvLevelisedPrice, 1) + '/kg (flat LCOH at this recovery period: Rs ' + fmt(result.lcoh, 1) + '/kg).' }));
+
+      var gap = neutral && neutral.ok ? reprice.pvLevelisedPrice - neutral.lcoh : NaN;
+      var neutralOk = Number.isFinite(gap) && Math.abs(gap) <= 1.0;
+      var check = el('p', { class: 'neutrality-check' });
+      check.appendChild(el('strong', {
+        text: neutralOk ? 'NPV-neutrality check: passes. ' : 'NPV-neutrality check: see note. ',
+      }));
+      check.appendChild(txt(
+        'Levelising the block prices over ' + params.plantLife + ' years gives Rs ' +
+        fmt(reprice.pvLevelisedPrice, 1) + '/kg. A flat price recovering the same capital over the same ' +
+        params.plantLife + ' years gives Rs ' + (neutral && neutral.ok ? fmt(neutral.lcoh, 1) : '—') +
+        '/kg. Difference: Rs ' + (Number.isFinite(gap) ? fmt(Math.abs(gap), 2) : '—') +
+        '/kg. Repricing therefore shifts when the developer is paid, not how much in present-value terms.'
+      ));
+      summary.appendChild(check);
+
+      // The headline tile uses the user's recovery period, so the two numbers
+      // differ whenever that is shorter than the plant life. Say why, rather
+      // than leaving an unexplained gap next to a "validation" line.
+      if (params.n !== params.plantLife) {
+        summary.appendChild(el('p', {
+          class: 'muted',
+          text: 'The headline LCOH of Rs ' + fmt(result.lcoh, 1) + '/kg is higher because it recovers the capital over your ' +
+            params.n + '-year recovery period rather than the full ' + params.plantLife +
+            '-year plant life. That is a different amortisation, not a different total cost.',
+        }));
+      }
+      if (params.residualPct > 0) {
+        summary.appendChild(el('p', {
+          class: 'muted',
+          text: 'Your ' + fmt(params.residualPct, 0) + '% residual value is credited in the headline LCOH but not in the regulatory rate base, which depreciates to zero. The check above therefore compares against a no-residual flat price.',
+        }));
+      }
+      // Known limitation, surfaced rather than left as an unexplained gap: the
+      // flat LCOH runs a sinking fund covering every stack replacement, while
+      // the regulatory schedule funds a single one. They agree at zero or one
+      // replacement, which covers the default 20-year plant life.
+      if (!neutralOk && Number.isFinite(result.stackIntervalYears) && result.stackIntervalYears > 0) {
+        var replacements = Math.max(0, Math.ceil(params.plantLife / result.stackIntervalYears) - 1);
+        if (replacements > 1) {
+          summary.appendChild(el('p', {
+            class: 'muted',
+            text: 'The difference is stack financing, not capital recovery. Over ' + params.plantLife +
+              ' years at ' + fmt(result.stackIntervalYears, 1) + ' years per stack the flat LCOH funds about ' +
+              replacements + ' replacements through its sinking fund, while the regulatory schedule adds a single one to the rate base. Shorten the plant life, or lengthen stack life, to bring the two onto the same basis.',
+          }));
+        }
+      }
+
       summary.appendChild(el('p', { text: 'Project NPV at the discount rate: Rs ' + fmt(reprice.npv / 1e7, 2) + ' cr. Project IRR: ' + (reprice.irr !== null ? (reprice.irr * 100).toFixed(2) + '%' : 'not solvable for this cash-flow pattern') + '.' }));
       els.repriceBody.appendChild(summary);
     }

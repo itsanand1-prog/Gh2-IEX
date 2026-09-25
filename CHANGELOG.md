@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.1.2] - 2026-09-25
+
+### Fixed
+- **The repricing NPV-neutrality check compared against the wrong baseline.**
+  It measured the PV-levelised block price against the headline LCOH, which
+  amortises capital over the user's recovery period, while the block prices
+  span the whole plant life and the rate base credits no residual. At the
+  application's own defaults (N=7, plant life 20) this displayed Rs 268.5/kg
+  beside Rs 312.1/kg — a Rs 43.7/kg gap on the one line the specification
+  describes as "a key trust signal". It now compares like-for-like against a
+  flat price recovering the same capital over the same horizon, which agrees
+  to Rs 0.37/kg, and separately explains why the headline tile differs.
+  Found by auditing the scenario space rather than by the test suite, which
+  had only ever exercised the case where N equals plant life.
+
+### Added
+- Ten further tests pinning the neutrality identity across N = 3…20 and plant
+  lives of 10–30, asserting it holds against the plant-life benchmark and
+  *not* against the headline LCOH, that capital recovery alone is exact to
+  1e-6 at every plant life, and that the known stack-financing divergence
+  beyond one replacement stays bounded.
+- On-screen explanations when the check is affected by a residual credit or
+  by more than one stack replacement, instead of an unexplained number.
+
+### Known limitation
+- The flat LCOH funds every stack replacement through a sinking fund; the
+  repricing schedule follows the specification's pseudocode and funds one.
+  They agree at zero or one replacement, covering the default 20-year plant
+  life; beyond ~21 years they diverge by about Rs 1.7/kg. Documented in the
+  README and surfaced in the dashboard.
+
 ## [2.1.1] - 2026-09-25
 
 ### Changed
