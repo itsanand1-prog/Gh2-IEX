@@ -280,15 +280,10 @@ cheaper of the two neighbouring blocks each time — or **discarded**, if the
 extended window no longer averages at or below your ceiling. See
 `apply_minrun` in `generate_data.py` for the exact algorithm.
 
-The setting is an electrolyser-chemistry choice, so it is exposed in the
-Assumptions panel:
-
-| Setting | Suits | Notes |
-|---|---|---|
-| 0.5 h | PEM | PEM stacks ramp and cycle quickly |
-| 1 h | PEM | A more conservative PEM assumption |
-| **2 h** | **Alkaline (default)** | Alkaline stacks ramp slowly and tolerate fewer cycles |
-| 4 h | Alkaline, conservative | Longest committed run |
+The setting is exposed in the Assumptions panel and takes one of four
+values: **0.5 h, 1 h, 2 h (default) or 4 h**. It is purely a dispatch
+constraint — a longer minimum forces the plant to commit to runs it might
+otherwise skip. It does not change the LCOH formula or any other input.
 
 **Only these four values are available, and that is a data constraint rather
 than a design choice.** The min-run rule depends on which 15-minute blocks
