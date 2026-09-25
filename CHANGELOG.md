@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.1.1] - 2026-09-25
+
+### Changed
+- Minimum operation time options are now plain values — `0.5 h`, `1 h`,
+  `2 h`, `4 h` — with no electrolyser-chemistry annotation. The chemistry
+  does not enter the LCOH formula, so labelling the options by it implied a
+  distinction the model does not make. It is presented as what it is: a
+  dispatch constraint the user sets.
+
 ## [2.1.0] - 2026-09-25
 
 ### Fixed
@@ -24,10 +33,9 @@ All notable changes to this project are documented in this file.
   that same sweep key.
 
 ### Changed
-- "Minimum run block" is now labelled **Minimum operation time**, with each
-  option annotated by the chemistry it suits (PEM at 0.5–1 h, alkaline at
-  2–4 h) and help text explaining the extend-or-discard rule and why only
-  four values are offered.
+- "Minimum run block" is now labelled **Minimum operation time**, with help
+  text explaining the extend-or-discard rule and why only four values are
+  offered.
 - README documents the setting, the chemistry choice, and the data
   constraint that makes it a fixed four-option selector rather than a free
   numeric input.

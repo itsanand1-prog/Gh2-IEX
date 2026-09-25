@@ -279,8 +279,6 @@
     var rafHandle = null;
     var chartRafHandle = null;
     var lastState = null; // cached model output, so resize can redraw charts only
-    // Which electrolyser chemistry each minimum-operation-time setting suits.
-    var MIN_RUN_HINTS = { 0.5: 'PEM', 1: 'PEM', 2: 'alkaline', 4: 'alkaline, conservative' };
     var els = {}; // filled by buildLayout()
 
     function fmt(n, digits) {
@@ -537,10 +535,7 @@
 
       var mrSel = el('select', { id: 'in-mr' });
       API.MIN_RUN_HOURS.forEach(function (h) {
-        var opt = el('option', {
-          value: String(h),
-          text: h + ' h' + (MIN_RUN_HINTS[h] ? ' — ' + MIN_RUN_HINTS[h] : ''),
-        });
+        var opt = el('option', { value: String(h), text: h + ' h' });
         if (h === params.minRunHours) opt.selected = true;
         mrSel.appendChild(opt);
       });
@@ -548,7 +543,7 @@
       techFieldset.appendChild(field('Minimum operation time', mrSel));
       techFieldset.appendChild(el('p', {
         class: 'note',
-        text: 'Once started, the plant must keep running for at least this long. A stretch of cheap blocks shorter than this is either extended to reach it — taking the cheaper neighbouring block each time — or skipped if the extended window no longer averages below your ceiling. PEM stacks ramp and cycle quickly, so 0.5–1 h is realistic for them; alkaline stacks are slower and tolerate fewer cycles, so 2–4 h is the usual assumption. Only these four values are available: the rule depends on which blocks are adjacent in time, so each setting is pre-computed from the underlying 15-minute price series rather than derived in the browser.',
+        text: 'Once started, the plant must keep running for at least this long. A stretch of cheap blocks shorter than this is either extended to reach it — taking the cheaper neighbouring block each time — or skipped if the extended window no longer averages below your ceiling. Only these four values are available: the rule depends on which blocks are adjacent in time, so each setting is pre-computed from the underlying 15-minute price series rather than derived in the browser.',
       }));
 
       techFieldset.appendChild(rangeNumberPair('in-om', 'Fixed O&M (% of capex/yr)', 0, 15, 0.1, params.omPct,
